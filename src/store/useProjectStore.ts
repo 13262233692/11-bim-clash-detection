@@ -6,6 +6,9 @@ import type {
   MaterialInfo,
   ClashPair,
   ClashRequest,
+  MeasurePoint,
+  MeasureLine,
+  MeasureMode,
 } from "@/types";
 
 interface ProjectState {
@@ -21,6 +24,11 @@ interface ProjectState {
   visibleCategories: Record<string, boolean>;
   clashPoints: [number, number, number][];
   focusedComponentId: number | null;
+  measureEnabled: boolean;
+  measureMode: MeasureMode;
+  measureStart: MeasurePoint | null;
+  measureEnd: MeasurePoint | null;
+  measureLines: MeasureLine[];
 }
 
 interface ProjectActions {
@@ -38,6 +46,14 @@ interface ProjectActions {
   focusComponent: (expressId: number | null) => void;
   createDemoProject: () => Promise<void>;
   reset: () => void;
+  setMeasureEnabled: (enabled: boolean) => void;
+  setMeasureMode: (mode: MeasureMode) => void;
+  setMeasureStart: (point: MeasurePoint | null) => void;
+  setMeasureEnd: (point: MeasurePoint | null) => void;
+  addMeasureLine: (line: MeasureLine) => void;
+  removeMeasureLine: (id: string) => void;
+  clearMeasureLines: () => void;
+  resetMeasure: () => void;
 }
 
 const initialState: ProjectState = {
@@ -59,6 +75,11 @@ const initialState: ProjectState = {
   },
   clashPoints: [],
   focusedComponentId: null,
+  measureEnabled: false,
+  measureMode: "idle",
+  measureStart: null,
+  measureEnd: null,
+  measureLines: [],
 };
 
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
@@ -244,6 +265,49 @@ export const useProjectStore = create<ProjectState & ProjectActions>(
 
     reset: () => {
       set(initialState);
+    },
+
+    setMeasureEnabled: (enabled) => {
+      set({
+        measureEnabled: enabled,
+        measureMode: enabled ? "idle" : "idle",
+        measureStart: null,
+        measureEnd: null,
+      });
+    },
+
+    setMeasureMode: (mode) => {
+      set({ measureMode: mode });
+    },
+
+    setMeasureStart: (point) => {
+      set({ measureStart: point });
+    },
+
+    setMeasureEnd: (point) => {
+      set({ measureEnd: point });
+    },
+
+    addMeasureLine: (line) => {
+      set((s) => ({ measureLines: [...s.measureLines, line] }));
+    },
+
+    removeMeasureLine: (id) => {
+      set((s) => ({
+        measureLines: s.measureLines.filter((l) => l.id !== id),
+      }));
+    },
+
+    clearMeasureLines: () => {
+      set({ measureLines: [] });
+    },
+
+    resetMeasure: () => {
+      set({
+        measureMode: "idle",
+        measureStart: null,
+        measureEnd: null,
+      });
     },
   })
 );

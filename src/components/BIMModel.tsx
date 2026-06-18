@@ -4,16 +4,18 @@ import { useProjectStore } from "@/store/useProjectStore";
 
 interface BIMModelProps {
   wireframe?: boolean;
+  meshesRef?: React.MutableRefObject<THREE.Group | null>;
 }
 
-export default function BIMModel({ wireframe = false }: BIMModelProps) {
+export default function BIMModel({ wireframe = false, meshesRef }: BIMModelProps) {
   const geometries = useProjectStore((s) => s.geometries);
   const visibleCategories = useProjectStore((s) => s.visibleCategories);
   const materials = useProjectStore((s) => s.materials);
   const selectComponent = useProjectStore((s) => s.selectComponent);
   const selectedComponent = useProjectStore((s) => s.selectedComponent);
 
-  const meshesRef = useRef<THREE.Group>(null);
+  const localRef = useRef<THREE.Group>(null);
+  const meshesGroupRef = meshesRef ?? localRef;
 
   const geometryMeshes = useMemo(() => {
     return geometries.map((geom) => {
@@ -100,7 +102,7 @@ export default function BIMModel({ wireframe = false }: BIMModelProps) {
   if (geometryMeshes.length === 0) return null;
 
   return (
-    <group ref={meshesRef}>
+    <group ref={meshesGroupRef}>
       {geometryMeshes.map((mesh) => (
         <mesh
           key={mesh.id}
@@ -113,7 +115,9 @@ export default function BIMModel({ wireframe = false }: BIMModelProps) {
             e.stopPropagation();
             handleClick(mesh.componentId);
           }}
+          onPointerMissed={() => {}}
           frustumCulled
+          userData={{ componentId: mesh.componentId }}
         />
       ))}
     </group>

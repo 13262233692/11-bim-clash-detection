@@ -56,3 +56,21 @@ export interface ClashRequest {
   categoryB: string[];
   tolerance: number;
 }
+
+export interface MeasurePoint {
+  position: [number, number, number];
+  normal: [number, number, number];
+  componentId?: number;
+}
+
+export interface MeasureLine {
+  id: string;
+  start: MeasurePoint;
+  end: MeasurePoint;
+  distance: number;
+  delta: [number, number, number];
+  horizontalDistance: number;
+  verticalDistance: number;
+}
+
+export type MeasureMode = "idle" | "point1" | "dragging" | "completed";

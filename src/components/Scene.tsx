@@ -1,9 +1,10 @@
-import { useRef, useCallback, useEffect } from "react";
+import { useRef, useCallback, useEffect, createContext, useContext } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
 import * as THREE from "three";
 import BIMModel from "./BIMModel";
 import ClashMarker from "./ClashMarker";
+import MeasureTool from "./MeasureTool";
 import { useProjectStore } from "@/store/useProjectStore";
 
 function CameraController() {
@@ -67,9 +68,10 @@ interface SceneProps {
   onScreenshot?: () => void;
 }
 
-function SceneInner({ wireframe }: { wireframe?: boolean }) {
+function SceneInner({ wireframe, meshesGroupRef }: { wireframe?: boolean; meshesGroupRef: React.MutableRefObject<THREE.Group | null> }) {
   const clashPoints = useProjectStore((s) => s.clashPoints);
   const geometries = useProjectStore((s) => s.geometries);
+  const measureEnabled = useProjectStore((s) => s.measureEnabled);
 
   return (
     <>
@@ -86,11 +88,13 @@ function SceneInner({ wireframe }: { wireframe?: boolean }) {
         dampingFactor={0.1}
         minDistance={0.5}
         maxDistance={500}
+        enabled={!measureEnabled}
       />
-      {geometries.length > 0 && <BIMModel wireframe={wireframe} />}
+      {geometries.length > 0 && <BIMModel wireframe={wireframe} meshesRef={meshesGroupRef} />}
       {clashPoints.map((point, i) => (
         <ClashMarker key={i} position={point} />
       ))}
+      {geometries.length > 0 && <MeasureTool meshGroupRef={meshesGroupRef} />}
       <Grid
         args={[100, 100]}
         cellSize={1}
@@ -110,6 +114,7 @@ function SceneInner({ wireframe }: { wireframe?: boolean }) {
 
 export default function Scene({ wireframe = false }: SceneProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const meshesGroupRef = useRef<THREE.Group | null>(null);
 
   const handleCreated = useCallback(
     (state: { gl: THREE.WebGLRenderer }) => {
@@ -127,7 +132,7 @@ export default function Scene({ wireframe = false }: SceneProps) {
       gl={{ antialias: true, preserveDrawingBuffer: true }}
       style={{ width: "100%", height: "100%" }}
     >
-      <SceneInner wireframe={wireframe} />
+      <SceneInner wireframe={wireframe} meshesGroupRef={meshesGroupRef} />
     </Canvas>
   );
 }

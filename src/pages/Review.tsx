@@ -12,12 +12,16 @@ import {
   Grid3x3,
   Eye,
   Triangle,
+  Ruler,
+  Trash2,
+  X,
 } from "lucide-react";
 import Scene from "@/components/Scene";
 import ModelTree from "@/components/ModelTree";
 import MaterialLayers from "@/components/MaterialLayers";
 import ClashPanel from "@/components/ClashPanel";
 import PropertyPanel from "@/components/PropertyPanel";
+import MeasurePanel from "@/components/MeasurePanel";
 import { useProjectStore } from "@/store/useProjectStore";
 
 export default function Review() {
@@ -31,11 +35,15 @@ export default function Review() {
   const fetchGeometry = useProjectStore((s) => s.fetchGeometry);
   const fetchMaterials = useProjectStore((s) => s.fetchMaterials);
   const reset = useProjectStore((s) => s.reset);
+  const measureEnabled = useProjectStore((s) => s.measureEnabled);
+  const setMeasureEnabled = useProjectStore((s) => s.setMeasureEnabled);
+  const clearMeasureLines = useProjectStore((s) => s.clearMeasureLines);
+  const measureLines = useProjectStore((s) => s.measureLines);
 
   const [leftPanel, setLeftPanel] = useState(true);
   const [rightPanel, setRightPanel] = useState(true);
   const [leftTab, setLeftTab] = useState<"tree" | "materials">("tree");
-  const [rightTab, setRightTab] = useState<"properties" | "clash">("properties");
+  const [rightTab, setRightTab] = useState<"properties" | "clash" | "measure">("properties");
   const [wireframe, setWireframe] = useState(false);
   const [fps, setFps] = useState(0);
 
@@ -213,6 +221,35 @@ export default function Review() {
               >
                 <Camera size={14} />
               </button>
+              <div className="h-4 w-px bg-bim-border mx-1" />
+              <button
+                onClick={() => {
+                  setMeasureEnabled(!measureEnabled);
+                  if (!measureEnabled) setRightTab("measure");
+                }}
+                className={`p-1.5 rounded transition-colors relative ${
+                  measureEnabled
+                    ? "bg-amber-500/20 text-amber-400"
+                    : "hover:bg-amber-500/20 text-slate-400 hover:text-amber-400"
+                }`}
+                title={measureEnabled ? "关闭测量" : "开启测量"}
+              >
+                <Ruler size={14} />
+                {measureLines.length > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-amber-500 text-bim-bg text-[9px] font-mono flex items-center justify-center font-bold">
+                    {measureLines.length}
+                  </span>
+                )}
+              </button>
+              {measureLines.length > 0 && (
+                <button
+                  onClick={() => clearMeasureLines()}
+                  className="p-1.5 rounded hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition-colors"
+                  title="清空测量"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
             </div>
             <div className="flex items-center gap-3 text-[10px] font-mono text-bim-muted">
               <span className="flex items-center gap-1">
@@ -245,11 +282,32 @@ export default function Review() {
                     : "text-bim-muted hover:text-slate-300"
                 }`}
               >
-                Clash Detection
+                Clash
+              </button>
+              <button
+                onClick={() => setRightTab("measure")}
+                className={`flex-1 px-3 py-2 text-xs font-mono transition-colors relative ${
+                  rightTab === "measure"
+                    ? "text-amber-400 border-b-2 border-amber-400"
+                    : "text-bim-muted hover:text-slate-300"
+                }`}
+              >
+                Measure
+                {measureLines.length > 0 && (
+                  <span className="absolute top-1 right-1 w-3.5 h-3.5 rounded-full bg-amber-500/80 text-bim-bg text-[9px] font-mono flex items-center justify-center font-bold">
+                    {measureLines.length}
+                  </span>
+                )}
               </button>
             </div>
             <div className="flex-1 overflow-hidden">
-              {rightTab === "properties" ? <PropertyPanel /> : <ClashPanel />}
+              {rightTab === "properties" ? (
+                <PropertyPanel />
+              ) : rightTab === "clash" ? (
+                <ClashPanel />
+              ) : (
+                <MeasurePanel />
+              )}
             </div>
           </div>
         )}
