@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import type { IFCComponent, GeometryData, MaterialInfo } from "../../shared/types.js";
+import { translate, scale, multiply, IDENTITY_MATRIX, rotateX, rotateY } from "../../shared/matrix.js";
 
 interface DemoComponentDef {
   expressId: number;
@@ -26,19 +27,16 @@ const DEMO_MATERIALS: MaterialInfo[] = [
 function boxToGeometry(
   id: string,
   componentId: number,
-  box: [number, number, number, number, number, number],
   color: string,
   materialId: string
 ): GeometryData {
-  const [x0, y0, z0, x1, y1, z1] = box;
-
   const positions = [
-    x0, y0, z0, x1, y0, z0, x1, y1, z0, x0, y1, z0,
-    x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1,
-    x0, y0, z0, x0, y0, z1, x0, y1, z1, x0, y1, z0,
-    x1, y0, z0, x1, y0, z1, x1, y1, z1, x1, y1, z0,
-    x0, y1, z0, x1, y1, z0, x1, y1, z1, x0, y1, z1,
-    x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1,
+    -0.5, -0.5, -0.5,  0.5, -0.5, -0.5,  0.5,  0.5, -0.5, -0.5,  0.5, -0.5,
+    -0.5, -0.5,  0.5,  0.5, -0.5,  0.5,  0.5,  0.5,  0.5, -0.5,  0.5,  0.5,
+    -0.5, -0.5, -0.5, -0.5, -0.5,  0.5, -0.5,  0.5,  0.5, -0.5,  0.5, -0.5,
+     0.5, -0.5, -0.5,  0.5, -0.5,  0.5,  0.5,  0.5,  0.5,  0.5,  0.5, -0.5,
+    -0.5,  0.5, -0.5,  0.5,  0.5, -0.5,  0.5,  0.5,  0.5, -0.5,  0.5,  0.5,
+    -0.5, -0.5, -0.5,  0.5, -0.5, -0.5,  0.5, -0.5,  0.5, -0.5, -0.5,  0.5,
   ];
 
   const normals = [
@@ -59,15 +57,15 @@ function boxToGeometry(
     20, 21, 22, 20, 22, 23,
   ];
 
-  return { id, positions, normals, indices, materialId, componentId, color };
+  return {
+    id, positions, normals, indices, materialId, componentId, color,
+    transform: [...IDENTITY_MATRIX],
+  };
 }
 
 function cylinderToGeometry(
   id: string,
   componentId: number,
-  cx: number, cy: number, cz: number,
-  radius: number, length: number,
-  axis: "x" | "y" | "z",
   color: string,
   materialId: string,
   segments: number = 12
@@ -81,22 +79,10 @@ function cylinderToGeometry(
     const cos = Math.cos(angle);
     const sin = Math.sin(angle);
 
-    if (axis === "z") {
-      positions.push(cx + radius * cos, cy + radius * sin, cz);
-      positions.push(cx + radius * cos, cy + radius * sin, cz + length);
-      normals.push(cos, sin, 0);
-      normals.push(cos, sin, 0);
-    } else if (axis === "x") {
-      positions.push(cx, cy + radius * cos, cz + radius * sin);
-      positions.push(cx + length, cy + radius * cos, cz + radius * sin);
-      normals.push(0, cos, sin);
-      normals.push(0, cos, sin);
-    } else {
-      positions.push(cx + radius * cos, cy, cz + radius * sin);
-      positions.push(cx + length + radius * cos, cy, cz + radius * sin);
-      normals.push(cos, 0, sin);
-      normals.push(cos, 0, sin);
-    }
+    positions.push(0.5 * cos, 0.5 * sin, -0.5);
+    positions.push(0.5 * cos, 0.5 * sin, 0.5);
+    normals.push(cos, sin, 0);
+    normals.push(cos, sin, 0);
   }
 
   for (let i = 0; i < segments; i++) {
@@ -107,7 +93,10 @@ function cylinderToGeometry(
     indices.push(a, c, b, b, c, d);
   }
 
-  return { id, positions, normals, indices, materialId, componentId, color };
+  return {
+    id, positions, normals, indices, materialId, componentId, color,
+    transform: [...IDENTITY_MATRIX],
+  };
 }
 
 function buildComponentTree(defs: DemoComponentDef[]): IFCComponent[] {
@@ -139,6 +128,82 @@ function buildComponentTree(defs: DemoComponentDef[]): IFCComponent[] {
   }
 
   return roots;
+}
+
+function boxLocalTransform(box: [number, number, number, number, number, number]): number[] {
+  const [x0, y0, z0, x1, y1, z1] = box;
+  const sx = x1 - x0;
+  const sy = y1 - y0;
+  const sz = z1 - z0;
+  const tx = (x0 + x1) / 2;
+  const ty = (y0 + y1) / 2;
+  const tz = (z0 + z1) / 2;
+  const s = scale(sx, sy, sz);
+  const t = translate(tx, ty, tz);
+  return multiply(t, s);
+}
+
+function cylinderLocalTransform(box: [number, number, number, number, number, number]): number[] {
+  const [x0, y0, z0, x1, y1, z1] = box;
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const dz = z1 - z0;
+  const cx = (x0 + x1) / 2;
+  const cy = (y0 + y1) / 2;
+  const cz = (z0 + z1) / 2;
+
+  let length: number;
+  let radius: number;
+  let rotX = 0, rotY = 0;
+
+  if (Math.abs(dx) >= Math.abs(dy) && Math.abs(dx) >= Math.abs(dz)) {
+    length = Math.abs(dx);
+    radius = Math.min(Math.abs(dy), Math.abs(dz)) / 2;
+    rotY = dx > 0 ? Math.PI / 2 : -Math.PI / 2;
+  } else if (Math.abs(dy) >= Math.abs(dx) && Math.abs(dy) >= Math.abs(dz)) {
+    length = Math.abs(dy);
+    radius = Math.min(Math.abs(dx), Math.abs(dz)) / 2;
+    rotX = dy > 0 ? -Math.PI / 2 : Math.PI / 2;
+  } else {
+    length = Math.abs(dz);
+    radius = Math.min(Math.abs(dx), Math.abs(dy)) / 2;
+  }
+
+  const s = scale(radius * 2, radius * 2, length);
+  const rx = rotateX(rotX);
+  const ry = rotateY(rotY);
+  const t = translate(cx, cy, cz);
+  return multiply(multiply(multiply(t, ry), rx), s);
+}
+
+function computeWorldTransforms(
+  defs: DemoComponentDef[],
+  defMap: Map<number, DemoComponentDef>,
+  expressId: number,
+  parentWorldTransform: number[],
+  transforms: Map<number, number[]>
+): void {
+  const def = defMap.get(expressId);
+  if (!def) return;
+
+  const isSpatial = def.type === "IfcBuilding" || def.type === "IfcBuildingStorey";
+  let localTransform: number[];
+
+  if (isSpatial) {
+    localTransform = [...IDENTITY_MATRIX];
+  } else if (def.type === "IfcPipeSegment" || def.type === "IfcDuctSegment" || def.type === "IfcCableSegment") {
+    localTransform = cylinderLocalTransform(def.box);
+  } else {
+    localTransform = boxLocalTransform(def.box);
+  }
+
+  const worldTransform = multiply(parentWorldTransform, localTransform);
+  transforms.set(expressId, worldTransform);
+
+  const children = defs.filter(d => d.parent === expressId);
+  for (const child of children) {
+    computeWorldTransforms(defs, defMap, child.expressId, worldTransform, transforms);
+  }
 }
 
 export function generateDemoProject() {
@@ -384,6 +449,17 @@ export function generateDemoProject() {
     }
   }
 
+  const defMap = new Map<number, DemoComponentDef>();
+  for (const def of compDefs) {
+    defMap.set(def.expressId, def);
+  }
+
+  const worldTransforms = new Map<number, number[]>();
+  const rootDefs = compDefs.filter(d => !d.parent);
+  for (const rootDef of rootDefs) {
+    computeWorldTransforms(compDefs, defMap, rootDef.expressId, [...IDENTITY_MATRIX], worldTransforms);
+  }
+
   const geometries: GeometryData[] = [];
   const componentLookup = new Map<number, { expressId: number; name: string; type: string }>();
 
@@ -391,28 +467,18 @@ export function generateDemoProject() {
     if (def.type === "IfcBuilding" || def.type === "IfcBuildingStorey") continue;
 
     const geomId = `geom-${def.expressId}`;
+    const matId = DEMO_MATERIALS.find(m => m.name === def.material)?.id || "mat-concrete";
     let geom: GeometryData;
 
-    if (def.type === "IfcPipeSegment" || def.type === "IfcDuctSegment") {
-      const [x0, y0, z0, x1, y1, z1] = def.box;
-      const dx = x1 - x0;
-      const dy = y1 - y0;
-      const dz = z1 - z0;
-      const cx = (x0 + x1) / 2;
-      const cy = (y0 + y1) / 2;
-      const cz = (z0 + z1) / 2;
-
-      if (dz > dx && dz > dy) {
-        geom = cylinderToGeometry(geomId, def.expressId, cx - (dx / 2 - Math.min(dx, dy) / 4), cy, z0, Math.min(dx, dy) / 4, dz, "z", def.color, DEMO_MATERIALS.find(m => m.name === def.material)?.id || "mat-concrete");
-      } else if (dx > dy) {
-        geom = cylinderToGeometry(geomId, def.expressId, x0, cy, cz - (dz / 2 - Math.min(dx, dy) / 4), Math.min(dy, dz) / 4, dx, "x", def.color, DEMO_MATERIALS.find(m => m.name === def.material)?.id || "mat-concrete");
-      } else {
-        geom = cylinderToGeometry(geomId, def.expressId, x0, y0, cz, Math.min(dx, dz) / 4, dy, "y", def.color, DEMO_MATERIALS.find(m => m.name === def.material)?.id || "mat-concrete");
-      }
-      geom.componentId = def.expressId;
+    if (def.type === "IfcPipeSegment" || def.type === "IfcDuctSegment" || def.type === "IfcCableSegment") {
+      geom = cylinderToGeometry(geomId, def.expressId, def.color, matId);
     } else {
-      const matId = DEMO_MATERIALS.find(m => m.name === def.material)?.id || "mat-concrete";
-      geom = boxToGeometry(geomId, def.expressId, def.box, def.color, matId);
+      geom = boxToGeometry(geomId, def.expressId, def.color, matId);
+    }
+
+    const worldTransform = worldTransforms.get(def.expressId);
+    if (worldTransform) {
+      geom.transform = worldTransform;
     }
 
     geometries.push(geom);

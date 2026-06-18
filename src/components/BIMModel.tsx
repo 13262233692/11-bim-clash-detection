@@ -45,12 +45,27 @@ export default function BIMModel({ wireframe = false }: BIMModelProps) {
         side: THREE.DoubleSide,
       });
 
+      let matrix: THREE.Matrix4 | null = null;
+      if (geom.transform && geom.transform.length === 16) {
+        const isIdentity = geom.transform[0] === 1 && geom.transform[5] === 1 && geom.transform[10] === 1 &&
+          geom.transform[12] === 0 && geom.transform[13] === 0 && geom.transform[14] === 0 &&
+          geom.transform[1] === 0 && geom.transform[2] === 0 && geom.transform[3] === 0 &&
+          geom.transform[4] === 0 && geom.transform[6] === 0 && geom.transform[7] === 0 &&
+          geom.transform[8] === 0 && geom.transform[9] === 0 && geom.transform[11] === 0 &&
+          geom.transform[15] === 1;
+        if (!isIdentity) {
+          matrix = new THREE.Matrix4();
+          matrix.fromArray(geom.transform);
+        }
+      }
+
       return {
         geometry,
         material,
         componentId: geom.componentId,
         visible,
         id: geom.id,
+        matrix,
       };
     });
   }, [geometries, materials, visibleCategories, wireframe, selectedComponent]);
@@ -65,17 +80,20 @@ export default function BIMModel({ wireframe = false }: BIMModelProps) {
   }, [geometryMeshes]);
 
   const handleClick = (componentId: number) => {
-    const findComponent = useProjectStore.getState().modelTree;
-    if (!findComponent) return;
-    const find = (node: typeof findComponent): typeof node | null => {
-      if (node.expressId === componentId) return node;
-      for (const child of node.children) {
-        const found = find(child);
-        if (found) return found;
+    const modelTree = useProjectStore.getState().modelTree;
+    if (!modelTree || modelTree.length === 0) return;
+
+    const find = (nodes: typeof modelTree): typeof modelTree[0] | null => {
+      for (const node of nodes) {
+        if (node.expressId === componentId) return node;
+        if (node.children && node.children.length > 0) {
+          const found = find(node.children);
+          if (found) return found;
+        }
       }
       return null;
     };
-    const comp = find(findComponent);
+    const comp = find(modelTree);
     if (comp) selectComponent(comp);
   };
 
@@ -89,6 +107,8 @@ export default function BIMModel({ wireframe = false }: BIMModelProps) {
           geometry={mesh.geometry}
           material={mesh.material}
           visible={mesh.visible}
+          matrix={mesh.matrix || undefined}
+          matrixAutoUpdate={!mesh.matrix}
           onClick={(e) => {
             e.stopPropagation();
             handleClick(mesh.componentId);

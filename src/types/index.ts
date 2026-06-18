@@ -30,6 +30,7 @@ export interface GeometryData {
   materialId: string;
   componentId: number;
   color: string;
+  transform: number[];
 }
 
 export interface MaterialInfo {

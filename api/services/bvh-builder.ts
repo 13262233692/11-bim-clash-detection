@@ -1,4 +1,5 @@
 import type { GeometryData, BVHNode } from "../../shared/types.js";
+import { transformPoint, IDENTITY_MATRIX } from "../../shared/matrix.js";
 
 class AABB {
   min: [number, number, number];
@@ -69,7 +70,7 @@ interface BVHBuildNode {
   leaf?: BVHLeaf;
 }
 
-function computeGeometryAABB(geom: GeometryData): AABB {
+function computeLocalAABB(geom: GeometryData): AABB {
   const box = new AABB();
   const pos = geom.positions;
   for (let i = 0; i < pos.length; i += 3) {
@@ -81,6 +82,44 @@ function computeGeometryAABB(geom: GeometryData): AABB {
     box.max[2] = Math.max(box.max[2], pos[i + 2]);
   }
   return box;
+}
+
+function transformAABB(localBox: AABB, transform: number[]): AABB {
+  if (!transform || transform.length !== 16 ||
+      (transform[0] === 1 && transform[5] === 1 && transform[10] === 1 &&
+       transform[12] === 0 && transform[13] === 0 && transform[14] === 0)) {
+    return new AABB(localBox.min, localBox.max);
+  }
+
+  const corners: [number, number, number][] = [
+    [localBox.min[0], localBox.min[1], localBox.min[2]],
+    [localBox.max[0], localBox.min[1], localBox.min[2]],
+    [localBox.min[0], localBox.max[1], localBox.min[2]],
+    [localBox.max[0], localBox.max[1], localBox.min[2]],
+    [localBox.min[0], localBox.min[1], localBox.max[2]],
+    [localBox.max[0], localBox.min[1], localBox.max[2]],
+    [localBox.min[0], localBox.max[1], localBox.max[2]],
+    [localBox.max[0], localBox.max[1], localBox.max[2]],
+  ];
+
+  const worldBox = new AABB();
+  for (const corner of corners) {
+    const [x, y, z] = transformPoint(transform, corner[0], corner[1], corner[2]);
+    worldBox.min[0] = Math.min(worldBox.min[0], x);
+    worldBox.min[1] = Math.min(worldBox.min[1], y);
+    worldBox.min[2] = Math.min(worldBox.min[2], z);
+    worldBox.max[0] = Math.max(worldBox.max[0], x);
+    worldBox.max[1] = Math.max(worldBox.max[1], y);
+    worldBox.max[2] = Math.max(worldBox.max[2], z);
+  }
+
+  return worldBox;
+}
+
+function computeGeometryAABB(geom: GeometryData): AABB {
+  const localBox = computeLocalAABB(geom);
+  const transform = geom.transform || IDENTITY_MATRIX;
+  return transformAABB(localBox, transform);
 }
 
 function sahSplit(leaves: BVHLeaf[], parentBox: AABB): { left: BVHLeaf[]; right: BVHLeaf[]; axis: number } | null {

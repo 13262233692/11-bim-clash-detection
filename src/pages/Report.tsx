@@ -31,7 +31,11 @@ export default function Report() {
   useEffect(() => {
     if (!projectId) return;
     fetchProject(projectId);
-    runClashDetection(projectId, ["hvac", "plumbing", "electrical"], ["structural"], 0.01);
+    runClashDetection(projectId, {
+      categoryA: ["hvac", "plumbing", "electrical"],
+      categoryB: ["structural"],
+      tolerance: 0.01,
+    });
   }, [projectId, fetchProject, runClashDetection]);
 
   const filtered = clashResults.filter((c) => {

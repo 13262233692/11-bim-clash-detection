@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import type { IFCComponent, GeometryData, MaterialInfo } from "../../shared/types.js";
+import { IDENTITY_MATRIX, multiply, translate, scale, rotateX, rotateY, rotateZ } from "../../shared/matrix.js";
 
 type IfcCategory = "structural" | "hvac" | "plumbing" | "electrical" | "other";
 
@@ -159,6 +160,7 @@ export async function parseIFCFile(filePath: string): Promise<ParsedResult> {
               materialId: materialMap.get(matName)!.id,
               componentId: expressId,
               color: CATEGORY_COLORS[category],
+              transform: [...IDENTITY_MATRIX],
             });
           }
         } catch (geomErr) {
@@ -174,9 +176,128 @@ export async function parseIFCFile(filePath: string): Promise<ParsedResult> {
       }
     }
 
+    let componentTree: IFCComponent[] = components;
+    try {
+      const nodeMap = new Map<number, SpatialNode>();
+      const geomMap = new Map<string, GeometryData>();
+      for (const g of geometries) {
+        geomMap.set(g.id, g);
+      }
+
+      const allIfcIds = api.GetIfcEntityList ? api.GetIfcEntityList(modelID) : [];
+      const spatialTypes = new Set([
+        "IFCPROJECT", "IFCSITE", "IFCBUILDING", "IFCBUILDINGSTOREY", "IFCSPACE",
+        ...Array.from(STRUCTURAL_TYPES),
+        ...Array.from(HVAC_TYPES),
+        ...Array.from(PLUMBING_TYPES),
+        ...Array.from(ELECTRICAL_TYPES),
+      ]);
+
+      for (const expressId of allIfcIds) {
+        try {
+          const ifcObj = api.GetLine(modelID, expressId);
+          if (!ifcObj) continue;
+          const ifcType = (ifcObj.constructor?.name || ifcObj.type || "").toUpperCase();
+          if (!spatialTypes.has(ifcType)) continue;
+
+          const name = ifcObj.Name?.value || `${ifcType}_${expressId}`;
+          const category = categorizeComponent(ifcType);
+          const localTransform = extractLocalTransform(ifcObj, api, modelID);
+
+          const geom = geometries.find(g => g.componentId === expressId);
+
+          nodeMap.set(expressId, {
+            expressId,
+            type: ifcType,
+            name,
+            category,
+            geometryId: geom?.id,
+            material: "Default",
+            properties: {},
+            children: [],
+            parentId: null,
+            localTransform,
+          });
+        } catch (e) {
+          // skip
+        }
+      }
+
+      for (const [nodeId, node] of nodeMap) {
+        try {
+          const ifcObj = api.GetLine(modelID, nodeId);
+          if (!ifcObj) continue;
+
+          if (ifcObj.Decomposes) {
+            for (const relRef of ifcObj.Decomposes) {
+              const rel = api.GetLine(modelID, relRef.value);
+              if (rel?.RelatingObject) {
+                const parentId = rel.RelatingObject.value;
+                if (nodeMap.has(parentId) && parentId !== nodeId) {
+                  node.parentId = parentId;
+                  nodeMap.get(parentId)!.children.push(nodeId);
+                  break;
+                }
+              }
+            }
+          }
+
+          if (!node.parentId && ifcObj.ContainedInStructure) {
+            for (const relRef of ifcObj.ContainedInStructure) {
+              const rel = api.GetLine(modelID, relRef.value);
+              if (rel?.RelatingStructure) {
+                const parentId = rel.RelatingStructure.value;
+                if (nodeMap.has(parentId) && parentId !== nodeId) {
+                  node.parentId = parentId;
+                  nodeMap.get(parentId)!.children.push(nodeId);
+                  break;
+                }
+              }
+            }
+          }
+        } catch (e) {
+          // skip
+        }
+      }
+
+      const rootIds: number[] = [];
+      for (const [nodeId, node] of nodeMap) {
+        if (node.parentId === null || !nodeMap.has(node.parentId)) {
+          rootIds.push(nodeId);
+        }
+      }
+
+      function computeWorldTransform(nodeId: number, parentWorld: number[]): void {
+        const node = nodeMap.get(nodeId)!;
+        const worldTransform = multiply(parentWorld, node.localTransform);
+
+        if (node.geometryId) {
+          const geom = geomMap.get(node.geometryId);
+          if (geom) {
+            geom.transform = worldTransform;
+          }
+        }
+
+        for (const childId of node.children) {
+          computeWorldTransform(childId, worldTransform);
+        }
+      }
+
+      for (const rootId of rootIds) {
+        computeWorldTransform(rootId, [...IDENTITY_MATRIX]);
+      }
+
+      const builtTree = buildTreeFromNodes(nodeMap, rootIds);
+      if (builtTree.length > 0) {
+        componentTree = builtTree;
+      }
+    } catch (treeErr) {
+      console.warn("Failed to build spatial hierarchy, falling back to flat list:", treeErr);
+    }
+
     api.CloseModel(modelID);
 
-    return { components, geometries, materials, componentLookup };
+    return { components: componentTree, geometries, materials, componentLookup };
   } catch (err) {
     console.error("IFC parsing failed, using fallback:", err);
     return fallbackParse(filePath);
@@ -190,4 +311,103 @@ function fallbackParse(filePath: string): ParsedResult {
     materials: [],
     componentLookup: new Map(),
   };
+}
+
+interface SpatialNode {
+  expressId: number;
+  type: string;
+  name: string;
+  category: IfcCategory;
+  geometryId?: string;
+  material: string;
+  properties: Record<string, any>;
+  children: number[];
+  parentId: number | null;
+  localTransform: number[];
+}
+
+function buildTreeFromNodes(
+  nodes: Map<number, SpatialNode>,
+  rootIds: number[]
+): IFCComponent[] {
+  const result: IFCComponent[] = [];
+
+  function build(nodeId: number): IFCComponent {
+    const node = nodes.get(nodeId)!;
+    const comp: IFCComponent = {
+      expressId: node.expressId,
+      type: node.type,
+      name: node.name,
+      material: node.material,
+      category: node.category,
+      geometryId: node.geometryId,
+      properties: node.properties,
+      children: [],
+    };
+    for (const childId of node.children) {
+      comp.children.push(build(childId));
+    }
+    return comp;
+  }
+
+  for (const rootId of rootIds) {
+    result.push(build(rootId));
+  }
+
+  return result;
+}
+
+function extractLocalTransform(ifcObj: any, api: any, modelID: number): number[] {
+  try {
+    if (!ifcObj.ObjectPlacement) return [...IDENTITY_MATRIX];
+    const placement = api.GetLine(modelID, ifcObj.ObjectPlacement.value);
+    if (!placement || placement.type !== "IfcLocalPlacement") return [...IDENTITY_MATRIX];
+
+    const axisPlacement = api.GetLine(modelID, placement.RelativePlacement.value);
+    if (!axisPlacement) return [...IDENTITY_MATRIX];
+
+    let tx = 0, ty = 0, tz = 0;
+    if (axisPlacement.Location) {
+      const loc = api.GetLine(modelID, axisPlacement.Location.value);
+      if (loc && loc.Coordinates) {
+        const coords = loc.Coordinates;
+        if (Array.isArray(coords) && coords.length >= 3) {
+          tx = coords[0].value ?? coords[0] ?? 0;
+          ty = coords[1].value ?? coords[1] ?? 0;
+          tz = coords[2].value ?? coords[2] ?? 0;
+        }
+      }
+    }
+
+    return translate(tx, ty, tz);
+  } catch (e) {
+    return [...IDENTITY_MATRIX];
+  }
+}
+
+function findParentId(ifcObj: any, api: any, modelID: number, spatialMap: Map<number, any>): number | null {
+  try {
+    const rels = api.GetLine(modelID, ifcObj.expressId);
+    if (rels?.Decomposes) {
+      for (const relRef of rels.Decomposes) {
+        const rel = api.GetLine(modelID, relRef.value);
+        if (rel?.RelatingObject) {
+          const parentId = rel.RelatingObject.value;
+          if (spatialMap.has(parentId)) return parentId;
+        }
+      }
+    }
+    if (rels?.ContainedInStructure) {
+      for (const relRef of rels.ContainedInStructure) {
+        const rel = api.GetLine(modelID, relRef.value);
+        if (rel?.RelatingStructure) {
+          const parentId = rel.RelatingStructure.value;
+          if (spatialMap.has(parentId)) return parentId;
+        }
+      }
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
 }

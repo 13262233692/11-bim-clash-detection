@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import type { BVHNode, ClashPair, ClashResponse, GeometryData } from "../../shared/types.js";
+import { transformPoint, IDENTITY_MATRIX } from "../../shared/matrix.js";
 
 interface JobEntry {
   response: ClashResponse;
@@ -71,14 +72,33 @@ function geometryAABB(geom: GeometryData): BVHNode {
   let minX = Infinity, minY = Infinity, minZ = Infinity;
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
   const pos = geom.positions;
-  for (let i = 0; i < pos.length; i += 3) {
-    minX = Math.min(minX, pos[i]);
-    minY = Math.min(minY, pos[i + 1]);
-    minZ = Math.min(minZ, pos[i + 2]);
-    maxX = Math.max(maxX, pos[i]);
-    maxY = Math.max(maxY, pos[i + 1]);
-    maxZ = Math.max(maxZ, pos[i + 2]);
+
+  const transform = geom.transform || IDENTITY_MATRIX;
+  const hasTransform = transform && transform.length === 16 &&
+    !(transform[0] === 1 && transform[5] === 1 && transform[10] === 1 &&
+      transform[12] === 0 && transform[13] === 0 && transform[14] === 0);
+
+  if (hasTransform) {
+    for (let i = 0; i < pos.length; i += 3) {
+      const [x, y, z] = transformPoint(transform, pos[i], pos[i + 1], pos[i + 2]);
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      minZ = Math.min(minZ, z);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+      maxZ = Math.max(maxZ, z);
+    }
+  } else {
+    for (let i = 0; i < pos.length; i += 3) {
+      minX = Math.min(minX, pos[i]);
+      minY = Math.min(minY, pos[i + 1]);
+      minZ = Math.min(minZ, pos[i + 2]);
+      maxX = Math.max(maxX, pos[i]);
+      maxY = Math.max(maxY, pos[i + 1]);
+      maxZ = Math.max(maxZ, pos[i + 2]);
+    }
   }
+
   return {
     min: [minX, minY, minZ] as [number, number, number],
     max: [maxX, maxY, maxZ] as [number, number, number],
